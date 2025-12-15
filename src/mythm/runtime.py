@@ -1,5 +1,8 @@
 import pygame, os, json
 
+COUNTDOWN_MS = 3000  # 3..2..1
+GO_MS = 450          # โชว์ "GO" หลังเริ่มเพลง
+
 W, H = 980, 620
 JUDGE_Y = 520
 SPAWN_TIME = 2600  # ms
@@ -50,10 +53,10 @@ def load_chart(artist, song, lanes, diff):
 def audio_path(artist, song):
     return os.path.join(song_base(artist, song), "song.wav")
 
-def now_ms(offset_ms):
-    p = pygame.mixer.music.get_pos()
-    if p < 0: p = 0
-    return p + offset_ms
+def now_ms(offset_ms, song_start_tick):
+    # เวลาเพลง = เวลาเครื่อง - tick ที่เริ่มเพลง
+    t = pygame.time.get_ticks()
+    return max(0, t - song_start_tick) + offset_ms
 
 def lane_layout(lanes):
     lane_w = 90 if lanes == 6 else 110
@@ -134,6 +137,11 @@ def main():
     pygame.mixer.pre_init(44100, -16, 2, 2048)
     pygame.mixer.init()
 
+    countdown_until_tick = 0   # pygame ticks
+    song_start_tick = 0        # pygame ticks (เวลาที่เพลงเริ่มจริง)
+    go_until_tick = 0
+    music_started = False
+
     screen = pygame.display.set_mode((W, H))
     pygame.display.set_caption("SuperStar Rhythm (multi-song)")
     font = pygame.font.SysFont("Arial", 22)
@@ -142,10 +150,15 @@ def main():
     clock = pygame.time.Clock()
 
     song_list = list_songs()
+    print("SONGS:", len(song_list))
+    for i, (a, s) in enumerate(song_list):
+        print(i, a, "/", s)
+        
     if not song_list:
         raise SystemExit("No songs found under songs/<artist>/<song_name>/")
 
     song_idx = 0
+    cur_artist, cur_song = song_list[song_idx]
     lanes = 6
     diff = "normal"
 
@@ -178,36 +191,49 @@ def main():
         KEYMAP, NUMMAP = keymaps(lanes)
 
     def restart_song(save_meta_first=True):
+        nonlocal countdown_until_tick, song_start_tick, go_until_tick, music_started
         nonlocal meta, notes, offset_ms, status, active, ni, combo, key_down_until
         nonlocal cal_errors, cal_last_saved_offset
+        nonlocal cur_artist, cur_song
 
-        artist, song = song_list[song_idx]
+        cur_artist, cur_song = song_list[song_idx]
 
         # save meta offset (if changed)
         if save_meta_first and meta is not None and cal_last_saved_offset is not None:
             try:
-                save_meta(artist, song, meta)
+                save_meta(cur_artist, cur_song, meta)
             except Exception:
                 pass
 
-        meta = load_meta(artist, song)
+        meta = load_meta(cur_artist, cur_song)
         offset_ms = int(meta.get("offsetMs", 0))
         cal_last_saved_offset = offset_ms
         cal_errors = []
 
-        notes, err = load_chart(artist, song, lanes, diff)
+        notes, err = load_chart(cur_artist, cur_song, lanes, diff)
         status = err or f"Loaded {len(notes)} notes."
 
+        # reset FX (รวม shake)
         fx.center_text = None
         fx.bursts.clear()
+        fx.shake_until = 0
+        fx.shake_amp = 0
+
         pygame.mixer.music.stop()
-        pygame.mixer.music.load(audio_path(artist, song))
-        pygame.mixer.music.play()
+        pygame.mixer.music.load(audio_path(cur_artist, cur_song))
+
+        # --- START COUNTDOWN ---
+        t = pygame.time.get_ticks()
+        countdown_until_tick = t + COUNTDOWN_MS
+        song_start_tick = countdown_until_tick  # จะเริ่มเพลงตอน countdown จบ
+        go_until_tick = 0
+        music_started = False
 
         active = []
         ni = 0
         combo = 0
         key_down_until = [0]*lanes
+
 
     def apply_auto_calibration():
         nonlocal offset_ms, cal_errors, cal_last_saved_offset
@@ -227,7 +253,7 @@ def main():
         meta["offsetMs"] = int(offset_ms)
         cal_last_saved_offset = offset_ms
 
-        fx.show_center("CAL", (200, 220, 255), now_ms(offset_ms), dur=260)
+        fx.show_center("CAL", (200, 220, 255), now_ms(offset_ms, song_start_tick), dur=260)
 
         # เซฟกลับ meta.json เมื่อเริ่มนิ่งพอ
         if len(cal_errors) >= cal_min_hits_to_save:
@@ -245,11 +271,19 @@ def main():
 
     running = True
     while running:
-        now = now_ms(offset_ms)
+        now = now_ms(offset_ms, song_start_tick)
         ox, oy = fx.cam(now)
+        t = pygame.time.get_ticks()
+
+        # start music exactly when countdown ends
+        if (not music_started) and t >= song_start_tick:
+            pygame.mixer.music.play()
+            music_started = True
+            go_until_tick = t + GO_MS
+
 
         # spawn
-        if notes:
+        if notes and music_started:
             while ni < len(notes) and now >= notes[ni]["tMs"] - SPAWN_TIME:
                 n = dict(notes[ni])
                 n["hit"] = False
@@ -404,12 +438,25 @@ def main():
 
         # HUD
         artist, song = song_list[song_idx]
-        screen.blit(big.render(f"{meta.get('title',song)} - {meta.get('artist',artist)}", True, (255,255,255)), (20+ox, 12+oy))
+        screen.blit(big.render(f"[{song_idx+1}/{len(song_list)}] {cur_song} - {cur_artist}", True, (255,255,255)),(20+ox, 12+oy))
+        # screen.blit(font.render(f"path: songs/{cur_artist}/{cur_song}", True, (160,160,160)),(20+ox, 110+oy))
+
         screen.blit(font.render(f"{lanes} lanes | diff={diff.upper()} (SHIFT+1/2/3) | key={key_mode} (TAB) | song (←/→) | F3 5↔6", True, (200,200,210)), (20+ox, 46+oy))
         screen.blit(font.render(f"Combo: {combo} | offsetMs={offset_ms} | hits(cal)={len(cal_errors)}", True, (255,200,120)), (20+ox, 76+oy))
         if status:
             screen.blit(font.render(status, True, (180,180,255)), (20+ox, 104+oy))
 
+        t = pygame.time.get_ticks()
+        if not music_started:
+            remain = max(0, countdown_until_tick - t)
+            num = 1 + (remain // 1000)  # 3,2,1
+            msg = str(int(num))
+            s = center_font.render(msg, True, (255,255,255))
+            screen.blit(s, (W//2 - s.get_width()//2 + ox, H//2 - s.get_height()//2 + oy))
+        elif go_until_tick and t < go_until_tick:
+            s = center_font.render("GO", True, (200,255,200))
+            screen.blit(s, (W//2 - s.get_width()//2 + ox, H//2 - s.get_height()//2 + oy))
+    
         pygame.display.flip()
         clock.tick(60)
 

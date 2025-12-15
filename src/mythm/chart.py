@@ -16,26 +16,27 @@ def norm01(x):
 def build_vocal_first(y, sr, lanes, diff):
     # ✅ เพิ่มความหนาแน่น (สำคัญ)
     if diff == "easy":
-        min_gap_ms = 120
-        wait = 5
-        target_npm = 260
-        strength_thr = 0.14
-        base_delta = 0.10
-        chorus_extra_prob = 0.25
+        min_gap_ms = 165
+        wait = 6
+        target_npm = 150
+        strength_thr = 0.16
+        base_delta = 0.12
+        chorus_extra_prob = 0.12
     elif diff == "normal":
-        min_gap_ms = 95
-        wait = 4
-        target_npm = 360
-        strength_thr = 0.12
-        base_delta = 0.09
-        chorus_extra_prob = 0.33
+        min_gap_ms = 130
+        wait = 6
+        target_npm = 210
+        strength_thr = 0.15
+        base_delta = 0.12
+        chorus_extra_prob = 0.16
     else:  # hard
-        min_gap_ms = 75
-        wait = 3
-        target_npm = 480
-        strength_thr = 0.10
-        base_delta = 0.08
-        chorus_extra_prob = 0.40
+        min_gap_ms = 105
+        wait = 5
+        target_npm = 280
+        strength_thr = 0.14
+        base_delta = 0.11
+        chorus_extra_prob = 0.20
+
 
     y_h, y_p = librosa.effects.hpss(y)
 
@@ -98,6 +99,13 @@ def build_vocal_first(y, sr, lanes, diff):
                 prev_lane = lane2
 
         notes.sort(key=lambda n: n["tMs"])
+        # ---- density clamp (กันแน่นเกิน) ----
+        max_notes = int(target_npm * (duration_s/60.0))
+        max_notes = max(120, max_notes)
+
+        if len(notes) > max_notes:
+            step = int(np.ceil(len(notes) / max_notes))
+            notes = notes[::step]
         return notes
 
     # ✅ “ไล่ลด” delta + thr จนกว่าจะถึง target
