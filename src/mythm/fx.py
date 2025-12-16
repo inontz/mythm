@@ -1,6 +1,15 @@
 import pygame
 
 class FX:
+    
+    @property
+    def center_text(self):
+        return self.center
+
+    @center_text.setter
+    def center_text(self, value):
+        self.center = value
+        
     def __init__(self):
         self.center = None         # (text, col, start_now_ms, dur_ms)
         self.bursts = []           # (x,y,col,start_now_ms,dur_ms)
@@ -24,7 +33,7 @@ class FX:
         self.shake_until = max(self.shake_until, t + dur)
         self.amp = max(self.amp, amp)
 
-    def cam(self):
+    def cam(self, now_ms=None):
         t = pygame.time.get_ticks()
         if t >= self.shake_until or self.amp <= 0:
             return 0, 0
@@ -32,3 +41,15 @@ class FX:
         ox = (t % span) - self.amp
         oy = ((t // 2) % span) - self.amp
         return ox, oy
+    
+        # --- compatibility aliases for newer runtime ---
+
+    def show_center(self, text, col, now_ms, dur=420):
+        # runtime calls show_center; internal name is show()
+        return self.show(text, col, now_ms, dur)
+
+    def shake_miss(self, now_ms=None, dur=210, amp=6):
+        # runtime calls shake_miss; internal name is shake()
+        return self.shake(dur=dur, amp=amp)
+
+

@@ -206,32 +206,63 @@ def render_lr6_beatup_ui(screen, active, now, key_down_until, font, flash: HitFl
         pygame.draw.circle(screen, (255,255,255), (x, y), r, width=ring)
 
     # notes travel + scale when close to judge
+    # notes travel + scale when close to judge
     for n in active:
-        if n["hit"]:
+        if n.get("hit"):
             continue
 
         lane = max(0, min(5, int(n.get("lane", 0))))
         (tx, ty), _ = slot_target_xy(lane)
 
-        p = (now - (n["tMs"] - SPAWN_TIME)) / max(1, SPAWN_TIME)  # 0..1 at judge
-        if p < 0 or p > 1.2:
+        t0 = int(n.get("tMs", 0))
+        note_type = n.get("type", "tap")
+        dur = int(n.get("durMs", 500)) if note_type == "hold" else 0
+        t1 = t0 + dur
+
+        # progress for head (start)
+        p = (now - (t0 - SPAWN_TIME)) / max(1, SPAWN_TIME)  # 0..1 at judge
+        if p < 0 or p > 1.25:
             continue
 
         if lane in (2,1,0):
             start_x = -180
-            x = int(start_x + p * (tx - start_x))
+            x = int(start_x + max(0.0, min(1.0, p)) * (tx - start_x))
         else:
             start_x = W + 180
-            x = int(start_x + p * (tx - start_x))
+            x = int(start_x + max(0.0, min(1.0, p)) * (tx - start_x))
 
         # ✅ โตตอนใกล้เส้น (ใกล้ 1.0 ใหญ่สุด)
-        # scale: 0.85 .. 1.55
         pp = max(0.0, min(1.0, p))
-        scale = 0.95 + (pp ** 2.2) * NEAR_SCALE   # ใกล้เส้นใหญ่ขึ้น
-        r = int(BASE_R * scale)
+        scale = 0.95 + (pp ** 2.2) * NEAR_SCALE
 
-        # scale: 0.85..1.55 (เหมือนเดิมที่คุณทำไว้)
         pressed = key_down_until[lane] > now
+
+        # HOLD body: draw bar from head->tail (tail = end time)
+        if note_type == "hold":
+            p_end = (now - (t1 - SPAWN_TIME)) / max(1, SPAWN_TIME)
+            p_end = max(0.0, min(1.25, p_end))
+
+            if lane in (2,1,0):
+                x_end = int(start_x + max(0.0, min(1.0, p_end)) * (tx - start_x))
+            else:
+                x_end = int(start_x + max(0.0, min(1.0, p_end)) * (tx - start_x))
+
+            r_bar = int(BASE_R * scale)
+            bar_h = max(10, int(r_bar * 1.05))
+            bx = min(x, x_end)
+            bw = abs(x - x_end)
+            if bw < 4:
+                bw = 4
+            bar = pygame.Rect(bx, ty - bar_h//2, bw, bar_h)
+
+            if pressed:
+                overlay = pygame.Surface((bar.w, bar.h), pygame.SRCALPHA)
+                overlay.fill((90, 255, 120, 55))
+                screen.blit(overlay, (bar.x, bar.y))
+
+            pygame.draw.rect(screen, (255,210,210), bar, border_radius=bar_h//2)
+            pygame.draw.rect(screen, (255,255,255), bar, width=3, border_radius=bar_h//2)
+
         draw_note_circle((x, ty), scale, pressed=pressed)
 
 
